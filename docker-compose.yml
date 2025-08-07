@@ -1,6 +1,6 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - Usando tus imágenes perfectas
+# 🏗️ FORO COMPLETO - Con PgBouncer Siempre (Configuración Corregida)
 services:
   # ===== BASE DE DATOS =====
   postgres:
@@ -22,31 +22,53 @@ services:
     networks:
       - foro_network
 
-  # ===== PGBOUNCER =====
+  # ===== PGBOUNCER (CONFIGURACIÓN CORREGIDA) =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
     restart: unless-stopped
     environment:
+      # 🎯 CONFIGURACIÓN CORREGIDA
       DATABASES_HOST: postgres
       DATABASES_PORT: 5432
       DATABASES_USER: ${POSTGRES_USER:-foro_user}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
       DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
+      
+      # 🔧 CONFIGURACIÓN MEJORADA PARA ESTABILIDAD
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 1000
       DEFAULT_POOL_SIZE: 30
       MIN_POOL_SIZE: 10
-      AUTH_TYPE: scram-sha-256
+      
+      # 🎯 AUTH TYPE CORREGIDO (sin scram-sha-256 que puede dar problemas)
+      AUTH_TYPE: md5
+      
+      # 🔧 TIMEOUTS MÁS GENEROSOS
+      SERVER_CONNECT_TIMEOUT: 15
+      CLIENT_LOGIN_TIMEOUT: 60
+      
+      # 🎯 LOG PARA DEBUGGING
+      LOG_CONNECTIONS: 1
+      LOG_DISCONNECTIONS: 1
+      VERBOSE: 1
+      
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - foro_network
 
-  # ===== 🎯 INIT: USANDO TU SCRIPT db:setup =====
+  # ===== INIT: Migraciones + Seed =====
   init:
     image: alexzafra13/foro-api:latest
     environment:
+      # 🎯 INIT USA CONEXIÓN DIRECTA (más confiable para migraciones)
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
@@ -54,11 +76,10 @@ services:
       - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
-      - NODE_ENV=development  # 🎯 CAMBIAR A development para crear usuarios
+      - NODE_ENV=production
     depends_on:
       postgres:
         condition: service_healthy
-    # 🎯 COMANDO PASO A PASO (más robusto)
     command: >
       sh -c "
         echo '🔄 Running migrations...' &&
@@ -66,7 +87,7 @@ services:
         echo '✅ Migrations completed' &&
         echo '🌱 Running seed...' &&
         npm run db:seed:prod &&
-        echo '✅ Seed completed - Ready!'
+        echo '✅ Seed completed - Ready for login!'
       "
     networks:
       - foro_network
@@ -76,8 +97,8 @@ services:
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
-    # ❌ Sin puerto externo - solo acceso interno via proxy
     environment:
+      # 🎯 BACKEND USA PGBOUNCER (para connection pooling)
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
@@ -96,6 +117,8 @@ services:
     depends_on:
       init:
         condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy  # 🎯 ESPERAR A QUE PGBOUNCER ESTÉ HEALTHY
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
@@ -105,7 +128,7 @@ services:
     networks:
       - foro_network
 
-  # ===== FRONTEND CON PROXY =====
+  # ===== FRONTEND =====
   frontend:
     image: alexzafra13/foro-frontend:latest
     restart: unless-stopped

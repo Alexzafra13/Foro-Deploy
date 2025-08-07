@@ -1,187 +1,215 @@
 # 🏗️ Foro - Sistema de Despliegue Completo
 
-Sistema de despliegue unificado para el foro completo (Backend + Frontend + Base de datos) usando Docker Compose.
+Sistema de despliegue unificado para foro completo con **PostgreSQL + PgBouncer + Backend + Frontend**.
 
 ## 🎯 ¿Qué incluye?
 
-- **Backend API**: Node.js + TypeScript + PostgreSQL
-- **Frontend**: React + Vite + Nginx  
-- **Base de datos**: PostgreSQL + PgBouncer
-- **Configuración automática** para diferentes entornos
+- **Backend API**: Node.js + TypeScript + PostgreSQL + PgBouncer
+- **Frontend**: React + Vite + Nginx (proxy interno)
+- **Base de datos**: PostgreSQL 17 + PgBouncer (connection pooling)
+- **Inicialización automática**: Migraciones y seed en primer arranque
 
 ## 🚀 Despliegue Rápido
 
-### Opción 1: Desarrollo Local
+### Cualquier Servidor (Local, Casa, VPS)
 ```bash
-git clone https://github.com/TU_USUARIO/foro-deploy.git
-cd foro-deploy
-chmod +x *.sh
-./deploy-local.sh
-```
-**Resultado**: Accesible en http://localhost:9050
-
-### Opción 2: Servidor de Casa (Auto-detecta IP)
-```bash
-./deploy-server.sh
-```
-**Resultado**: Accesible desde cualquier dispositivo en tu red
-
-### Opción 3: IP Personalizada
-```bash
-./deploy-custom.sh 192.168.1.100
-```
-
-## ⚙️ Configuración
-
-### 1. Archivo de Configuración
-```bash
-# Copiar y personalizar
+git clone https://github.com/Alexzafra13/Foro-Deploy.git
+cd Foro-Deploy
 cp .env.example .env
+
+# Editar credenciales:
 nano .env
+
+# Cambiar mínimo:
+# - POSTGRES_PASSWORD
+# - JWT_SECRET  
+# - SERVER_IP (si no es localhost)
+
+# Desplegar:
+docker-compose up -d
 ```
 
-### 2. Variables Importantes
+**¡Listo!** Accede en: `http://tu-server-ip:9050`
+
+## 🔑 Usuarios Por Defecto
+
+El sistema crea automáticamente estos usuarios:
+
+- **Admin**: `admin@foro.local` / `admin123`
+- **Moderador**: `mod@foro.local` / `admin123`
+- **Usuario**: `user@foro.local` / `admin123`
+
+## ⚙️ Configuración por Entorno
+
+### 🏠 Desarrollo Local
 ```bash
-# IP donde se despliega
-SERVER_IP=localhost          # Para desarrollo
-SERVER_IP=192.168.1.100     # Para red local  
-SERVER_IP=tu-ip-publica     # Para VPS
-
-# Puertos
-API_PORT=9090
+SERVER_IP=localhost
 FRONTEND_PORT=9050
-
-# Seguridad (⚠️ CAMBIAR EN PRODUCCIÓN)
-JWT_SECRET=tu-jwt-secret
-POSTGRES_PASSWORD=tu-password
 ```
+**Acceso**: http://localhost:9050
 
-## 🌐 Acceso
+### 🏡 Servidor de Casa
+```bash
+SERVER_IP=192.168.1.100  # Tu IP local
+FRONTEND_PORT=9050
+```
+**Acceso**: 
+- PC: http://192.168.1.100:9050
+- Móvil: http://192.168.1.100:9050
 
-| Servicio | URL Local | URL Red Local |
-|----------|-----------|---------------|
-| **Frontend** | http://localhost:9050 | http://192.168.1.X:9050 |
-| **Backend API** | http://localhost:9090 | http://192.168.1.X:9090 |
-| **Base de Datos** | localhost:5432 | 192.168.1.X:5432 |
+### ☁️ VPS Público
+```bash
+SERVER_IP=tu-ip-publica
+FRONTEND_PORT=9050
+```
+**Acceso**: http://tu-ip-publica:9050
 
-## 📱 Acceso Multi-dispositivo
+## 🏗️ Arquitectura
 
-Una vez desplegado en tu servidor, puedes acceder desde:
-- **PC**: http://IP-SERVIDOR:9050
-- **Móvil**: http://IP-SERVIDOR:9050  
-- **Tablet**: http://IP-SERVIDOR:9050
+```
+Internet/Red Local → [Puerto 9050]
+    ↓
+┌─────────────────────────────────┐
+│ 🌐 Frontend (Nginx)             │
+│ - Sirve React App               │
+│ - Proxy /api/* → Backend        │
+└─────────────────────────────────┘
+    ↓ (red interna)
+┌─────────────────────────────────┐
+│ ⚙️ Backend (Node.js)            │
+│ - API REST                      │
+│ - JWT Auth                      │
+└─────────────────────────────────┘
+    ↓
+┌─────────────────────────────────┐
+│ 🔄 PgBouncer                    │
+│ - Connection Pooling            │
+│ - 30 conexiones por defecto     │
+└─────────────────────────────────┘
+    ↓
+┌─────────────────────────────────┐
+│ 🗃️ PostgreSQL 17               │
+│ - Base de datos                 │
+│ - Datos persistentes           │
+└─────────────────────────────────┘
+```
 
 ## 🛠️ Comandos Útiles
 
 ```bash
-# Ver estado de servicios
+# Ver estado
 docker-compose ps
 
 # Ver logs
 docker-compose logs -f
 
-# Ver logs de un servicio específico
-docker-compose logs -f frontend
-docker-compose logs -f backend
+# Ver logs específicos
+docker-compose logs frontend
+docker-compose logs backend
 
-# Parar servicios
-./stop.sh
-
-# Actualizar a últimas versiones
-./update.sh
-
-# Reiniciar un servicio
+# Reiniciar servicios
+docker-compose restart backend
 docker-compose restart frontend
+
+# Parar todo
+docker-compose down
+
+# Parar y borrar datos
+docker-compose down -v
+
+# Actualizar imágenes
+docker-compose pull
+docker-compose up -d
 ```
 
 ## 🔧 Mantenimiento
 
 ### Actualizar Frontend
 ```bash
-# El desarrollador actualiza la imagen
 docker pull alexzafra13/foro-frontend:latest
 docker-compose restart frontend
 ```
 
 ### Actualizar Backend
 ```bash
-# El desarrollador actualiza la imagen  
 docker pull alexzafra13/foro-api:latest
 docker-compose restart backend
 ```
 
-### Backup de Base de Datos
+### Backup Base de Datos
 ```bash
-# Crear backup
-docker-compose exec postgres pg_dump -U foro_user forumDB > backup.sql
+docker-compose exec postgres pg_dump -U foro_user forumDB > backup-$(date +%Y%m%d).sql
+```
 
-# Restaurar backup
-docker-compose exec -T postgres psql -U foro_user forumDB < backup.sql
+### Restaurar Backup
+```bash
+docker-compose exec -T postgres psql -U foro_user forumDB < backup-fecha.sql
 ```
 
 ## 🐛 Solución de Problemas
 
 ### Frontend no carga
 ```bash
-# Verificar logs
 docker-compose logs frontend
-
-# Verificar que Nginx está corriendo
-docker-compose exec frontend nginx -t
+curl http://localhost:9050/health  # Debería responder "healthy"
 ```
 
-### Backend no responde  
+### Backend error 500
 ```bash
-# Verificar logs
 docker-compose logs backend
-
-# Verificar conexión a base de datos
-docker-compose exec backend curl localhost:3000/health
+# Verificar conexión PgBouncer:
+docker-compose exec backend curl http://localhost:3000/health
 ```
 
 ### Error de CORS
-- Verificar que `SERVER_IP` en `.env` sea correcta
-- Verificar que `ALLOWED_ORIGINS` incluya la URL correcta
+- Verificar `SERVER_IP` en `.env` 
+- Verificar `ALLOWED_ORIGINS` en logs del backend
 
-### No se puede acceder desde otros dispositivos
-- Verificar que `SERVER_IP` sea la IP correcta de red local
-- Verificar firewall del servidor
-- Probar: `ping IP-SERVIDOR` desde otro dispositivo
-
-## 📊 Arquitectura
-
-```
-Internet/Red Local
-        ↓
-[Puerto 9050] → Frontend (Nginx) → Archivos React
-        ↓
-[Puerto 9090] → Backend (Node.js) → API REST
-        ↓  
-[Puerto 5432] → PostgreSQL + PgBouncer → Base de Datos
+### PgBouncer no conecta
+```bash
+docker-compose logs pgbouncer
+# Verificar que PostgreSQL esté healthy:
+docker-compose ps postgres
 ```
 
-## 🔒 Seguridad
+## 📊 Monitoreo
 
-### Para Producción:
-1. **Cambiar passwords**: Editar `.env` con valores seguros
-2. **Generar JWT secret**: `openssl rand -hex 32`
-3. **Configurar email**: Para verificación de cuentas
-4. **Firewall**: Abrir solo puertos necesarios
-5. **SSL/HTTPS**: Usar reverse proxy (Nginx, Traefik)
+### Ver Conexiones PgBouncer
+```bash
+# Conectar a PgBouncer admin
+docker-compose exec postgres psql -h pgbouncer -p 6432 -U foro_user pgbouncer -c "SHOW POOLS;"
+```
+
+### Ver Estadísticas DB
+```bash
+docker-compose exec postgres psql -U foro_user -d forumDB -c "
+SELECT schemaname,tablename,n_tup_ins,n_tup_upd,n_tup_del 
+FROM pg_stat_user_tables 
+ORDER BY n_tup_ins DESC LIMIT 10;"
+```
+
+## 🔒 Seguridad para Producción
+
+1. **Cambiar passwords**: Generar valores seguros en `.env`
+2. **JWT secret**: `openssl rand -hex 32`
+3. **Email real**: Configurar SMTP válido
+4. **Firewall**: Abrir solo puerto necesario (9050)
+5. **SSL/HTTPS**: Usar reverse proxy (Nginx, Traefik, Cloudflare)
 
 ## 📋 Requisitos
 
-- Docker y Docker Compose instalados
-- Puertos 9050 y 9090 disponibles  
-- Al menos 1GB RAM libre
-- 2GB espacio en disco
+- **Docker**: 20.10+
+- **Docker Compose**: 1.29+
+- **RAM**: 1GB mínimo
+- **Disco**: 2GB mínimo
+- **Puertos**: 9050 libre
 
 ## 🆘 Soporte
 
-- **Issues**: [GitHub Issues](https://github.com/TU_USUARIO/foro-deploy/issues)
-- **Backend**: [Repo Backend](https://github.com/TU_USUARIO/foro-backend) 
-- **Frontend**: [Repo Frontend](https://github.com/TU_USUARIO/foro-frontend)
+- **Issues**: [GitHub Issues](https://github.com/Alexzafra13/Foro-Deploy/issues)
+- **Backend**: [alexzafra13/foro-api](https://hub.docker.com/r/alexzafra13/foro-api)
+- **Frontend**: [alexzafra13/foro-frontend](https://hub.docker.com/r/alexzafra13/foro-frontend)
 
 ---
 
-**Desarrollado con ❤️ usando Docker + Node.js + React**
+**Desarrollado con ❤️ usando Docker + PostgreSQL + PgBouncer + Node.js + React**
