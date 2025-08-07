@@ -1,0 +1,125 @@
+version: '3.8'
+
+# 🏗️ FORO COMPLETO - Backend + Frontend + Base de Datos
+# Repositorio: foro-deploy
+# Imágenes: alexzafra13/foro-api:latest + alexzafra13/foro-frontend:latest
+
+services:
+  # ===== BASE DE DATOS =====
+  postgres:
+    image: postgres:17-alpine
+    container_name: foro_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-foro_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      POSTGRES_DB: ${POSTGRES_DB:-forumDB}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - foro_postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups  # Para backups manuales
+    ports:
+      - "${DB_PORT:-5432}:5432"  # Solo para acceso directo si necesario
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-foro_user} -d ${POSTGRES_DB:-forumDB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - foro_network
+
+  # ===== PGBOUNCER (Connection Pooling) =====
+  pgbouncer:
+    image: pgbouncer/pgbouncer:latest
+    container_name: foro_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_USER: ${POSTGRES_USER:-foro_user}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 30
+      MIN_POOL_SIZE: 10
+      AUTH_TYPE: scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - foro_network
+
+  # ===== BACKEND API =====
+  backend:
+    image: alexzafra13/foro-api:${BACKEND_VERSION:-latest}
+    container_name: foro_backend
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-9090}:3000"
+    environment:
+      # Base de datos
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      
+      # Seguridad
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      
+      # Email
+      - MAILER_SERVICE=${MAILER_SERVICE:-gmail}
+      - MAILER_EMAIL=${MAILER_EMAIL:-noreply@localhost}
+      - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
+      
+      # Servidor y CORS - 🎯 CONFIGURACIÓN INTELIGENTE
+      - PORT=3000
+      - NODE_ENV=production
+      - FRONTEND_URL=http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050}
+      - ALLOWED_ORIGINS=http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050},http://${SERVER_IP:-localhost}:${API_PORT:-9090},http://localhost:${FRONTEND_PORT:-9050},http://localhost:${API_PORT:-9090}
+      
+      # Performance
+      - ENABLE_QUERY_LOGGING=${ENABLE_QUERY_LOGGING:-false}
+      - CONNECTION_POOL_SIZE=30
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - foro_network
+
+  # ===== FRONTEND =====
+  frontend:
+    image: alexzafra13/foro-frontend:${FRONTEND_VERSION:-latest}
+    container_name: foro_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-9050}:80"
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=http://${SERVER_IP:-localhost}:${API_PORT:-9090}/api
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - foro_network
+
+volumes:
+  foro_postgres_data:
+    driver: local
+
+networks:
+  foro_network:
+    driver: bridge
