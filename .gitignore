@@ -1,0 +1,30 @@
+# ===== ARCHIVOS DE CONFIGURACIÓN SENSIBLE =====
+.env
+.env.local
+.env.production
+.env.staging
+
+# ===== DATOS PERSISTENTES =====
+backups/
+server-data/
+postgres-data/
+
+# ===== LOGS DE DOCKER =====
+*.log
+docker-compose.override.yml
+
+# ===== ARCHIVOS TEMPORALES =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ===== EDITORES =====
+.vscode/
+.idea/
+*.sublime-*
+
+# ===== SISTEMA =====
+.cache/
+.tmp/
