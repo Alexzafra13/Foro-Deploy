@@ -1,14 +1,10 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - Backend + Frontend + Base de Datos
-# Repositorio: foro-deploy
-# Imágenes: alexzafra13/foro-api:latest + alexzafra13/foro-frontend:latest
-
+# 🏗️ FORO COMPLETO - Usando tus imágenes perfectas
 services:
   # ===== BASE DE DATOS =====
   postgres:
     image: postgres:17-alpine
-    container_name: foro_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-foro_user}
@@ -17,9 +13,7 @@ services:
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - foro_postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups  # Para backups manuales
-    ports:
-      - "${DB_PORT:-5432}:5432"  # Solo para acceso directo si necesario
+      - ./backups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-foro_user} -d ${POSTGRES_DB:-forumDB}"]
       interval: 10s
@@ -28,10 +22,9 @@ services:
     networks:
       - foro_network
 
-  # ===== PGBOUNCER (Connection Pooling) =====
+  # ===== PGBOUNCER =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
-    container_name: foro_pgbouncer
     restart: unless-stopped
     environment:
       DATABASES_HOST: postgres
@@ -50,42 +43,59 @@ services:
     networks:
       - foro_network
 
+  # ===== 🎯 INIT: USANDO TU SCRIPT db:setup =====
+  init:
+    image: alexzafra13/foro-api:latest
+    environment:
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
+      - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
+      - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      - NODE_ENV=development  # 🎯 CAMBIAR A development para crear usuarios
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 🎯 COMANDO PASO A PASO (más robusto)
+    command: >
+      sh -c "
+        echo '🔄 Running migrations...' &&
+        npx prisma migrate deploy &&
+        echo '✅ Migrations completed' &&
+        echo '🌱 Running seed...' &&
+        npm run db:seed:prod &&
+        echo '✅ Seed completed - Ready!'
+      "
+    networks:
+      - foro_network
+    restart: "no"
+
   # ===== BACKEND API =====
   backend:
-    image: alexzafra13/foro-api:${BACKEND_VERSION:-latest}
-    container_name: foro_backend
+    image: alexzafra13/foro-api:latest
     restart: unless-stopped
-    ports:
-      - "${API_PORT:-9090}:3000"
+    # ❌ Sin puerto externo - solo acceso interno via proxy
     environment:
-      # Base de datos
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
-      
-      # Seguridad
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
       - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
-      
-      # Email
       - MAILER_SERVICE=${MAILER_SERVICE:-gmail}
-      - MAILER_EMAIL=${MAILER_EMAIL:-noreply@localhost}
+      - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
-      
-      # Servidor y CORS - 🎯 CONFIGURACIÓN INTELIGENTE
       - PORT=3000
       - NODE_ENV=production
-      - FRONTEND_URL=http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050}
-      - ALLOWED_ORIGINS=http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050},http://${SERVER_IP:-localhost}:${API_PORT:-9090},http://localhost:${FRONTEND_PORT:-9050},http://localhost:${API_PORT:-9090}
-      
-      # Performance
-      - ENABLE_QUERY_LOGGING=${ENABLE_QUERY_LOGGING:-false}
+      - FRONTEND_URL=http://localhost:${FRONTEND_PORT:-9050}
+      - ALLOWED_ORIGINS=http://localhost:${FRONTEND_PORT:-9050},http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050}
+      - ENABLE_QUERY_LOGGING=false
       - CONNECTION_POOL_SIZE=30
-      
     depends_on:
-      postgres:
-        condition: service_healthy
+      init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
@@ -95,16 +105,12 @@ services:
     networks:
       - foro_network
 
-  # ===== FRONTEND =====
+  # ===== FRONTEND CON PROXY =====
   frontend:
-    image: alexzafra13/foro-frontend:${FRONTEND_VERSION:-latest}
-    container_name: foro_frontend
+    image: alexzafra13/foro-frontend:latest
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-9050}:80"
-    environment:
-      - NODE_ENV=production
-      - VITE_API_URL=http://${SERVER_IP:-localhost}:${API_PORT:-9090}/api
     depends_on:
       - backend
     healthcheck:
