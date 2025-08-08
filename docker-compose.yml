@@ -1,6 +1,6 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - Con PgBouncer Siempre (Configuración Corregida)
+# 🏗️ FORO COMPLETO - CON AUTO-DETECCIÓN INTELIGENTE
 services:
   # ===== BASE DE DATOS =====
   postgres:
@@ -93,7 +93,7 @@ services:
       - foro_network
     restart: "no"
 
-  # ===== BACKEND API =====
+  # ===== BACKEND API CON AUTO-DETECCIÓN =====
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
@@ -101,24 +101,34 @@ services:
       # 🎯 BACKEND USA PGBOUNCER (para connection pooling)
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      
+      # 🔐 SEGURIDAD
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
       - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      
+      # 📧 EMAIL
       - MAILER_SERVICE=${MAILER_SERVICE:-gmail}
       - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
+      
+      # ⚙️ SERVIDOR
       - PORT=3000
       - NODE_ENV=production
-      - FRONTEND_URL=http://localhost:${FRONTEND_PORT:-9050}
-      - ALLOWED_ORIGINS=http://localhost:${FRONTEND_PORT:-9050},http://${SERVER_IP:-localhost}:${FRONTEND_PORT:-9050}
       - ENABLE_QUERY_LOGGING=false
       - CONNECTION_POOL_SIZE=30
+      
+      # 🧠 AUTO-DETECCIÓN HABILITADA (NUEVAS VARIABLES)
+      - SERVER_IP=${SERVER_IP:-localhost}
+      - FRONTEND_PORT=${FRONTEND_PORT:-9050}
+      # ❌ ELIMINADAS: FRONTEND_URL y ALLOWED_ORIGINS (se auto-detectan)
+      
     depends_on:
       init:
         condition: service_completed_successfully
       pgbouncer:
-        condition: service_healthy  # 🎯 ESPERAR A QUE PGBOUNCER ESTÉ HEALTHY
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
