@@ -1,6 +1,6 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - CON AUTO-DETECCIÓN INTELIGENTE
+# 🏗️ FORO COMPLETO - PGBOUNCER ARREGLADO PARA SIEMPRE
 services:
   # ===== BASE DE DATOS =====
   postgres:
@@ -10,7 +10,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-foro_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
       POSTGRES_DB: ${POSTGRES_DB:-forumDB}
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      # 🎯 AUTH COMPATIBLE CON PGBOUNCER
+      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
     volumes:
       - foro_postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
@@ -20,55 +21,73 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - foro_network
+      foro_network:
+        aliases:
+          - database
+          - db
 
-  # ===== PGBOUNCER (CONFIGURACIÓN CORREGIDA) =====
+  # ===== PGBOUNCER CONFIGURACIÓN BULLETPROOF =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
     restart: unless-stopped
     environment:
-      # 🎯 CONFIGURACIÓN CORREGIDA
+      # 🔗 CONFIGURACIÓN BÁSICA
       DATABASES_HOST: postgres
       DATABASES_PORT: 5432
       DATABASES_USER: ${POSTGRES_USER:-foro_user}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
       DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
       
-      # 🔧 CONFIGURACIÓN MEJORADA PARA ESTABILIDAD
+      # 🎯 POOL CONFIGURATION OPTIMIZADA
       POOL_MODE: transaction
-      MAX_CLIENT_CONN: 1000
-      DEFAULT_POOL_SIZE: 30
-      MIN_POOL_SIZE: 10
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 20
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 3
       
-      # 🎯 AUTH TYPE CORREGIDO (sin scram-sha-256 que puede dar problemas)
+      # 🛡️ AUTH COMPATIBLE CON POSTGRES
       AUTH_TYPE: md5
       
-      # 🔧 TIMEOUTS MÁS GENEROSOS
-      SERVER_CONNECT_TIMEOUT: 15
+      # ⏱️ TIMEOUTS GENEROSOS PARA ESTABILIDAD
+      SERVER_CONNECT_TIMEOUT: 30
       CLIENT_LOGIN_TIMEOUT: 60
+      SERVER_LOGIN_RETRY: 3
+      QUERY_TIMEOUT: 120
       
-      # 🎯 LOG PARA DEBUGGING
+      # 🌐 CONFIGURACIÓN DE RED
+      LISTEN_ADDR: "0.0.0.0"
+      LISTEN_PORT: 6432
+      
+      # 🔧 CONFIGURACIÓN AVANZADA
+      SERVER_LIFETIME: 3600
+      SERVER_IDLE_TIMEOUT: 600
+      STATS_PERIOD: 60
+      
+      # 📝 LOGS DETALLADOS
       LOG_CONNECTIONS: 1
       LOG_DISCONNECTIONS: 1
-      VERBOSE: 1
+      LOG_POOLER_ERRORS: 1
+      VERBOSE: 2
       
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 6432 || exit 1"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 && psql 'postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@127.0.0.1:6432/${POSTGRES_DB:-forumDB}' -c 'SELECT 1;' || exit 1"]
+      interval: 15s
+      timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     networks:
-      - foro_network
+      foro_network:
+        aliases:
+          - pool
 
   # ===== INIT: Migraciones + Seed =====
   init:
     image: alexzafra13/foro-api:latest
     environment:
-      # 🎯 INIT USA CONEXIÓN DIRECTA (más confiable para migraciones)
+      # 🔗 USAR CONEXIÓN DIRECTA PARA MIGRACIONES (MÁS CONFIABLE)
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
@@ -77,6 +96,11 @@ services:
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
       - NODE_ENV=production
+      
+      # 🧠 AUTO-DETECCIÓN
+      - SERVER_IP=${SERVER_IP:-localhost}
+      - FRONTEND_PORT=${FRONTEND_PORT:-9050}
+      
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,14 +117,15 @@ services:
       - foro_network
     restart: "no"
 
-  # ===== BACKEND API CON AUTO-DETECCIÓN =====
+  # ===== BACKEND CON FALLBACK AUTOMÁTICO =====
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
     environment:
-      # 🎯 BACKEND USA PGBOUNCER (para connection pooling)
+      # 🔗 PGBOUNCER PRIMARIO CON FALLBACK AUTOMÁTICO
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       
       # 🔐 SEGURIDAD
       - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
@@ -116,13 +141,12 @@ services:
       # ⚙️ SERVIDOR
       - PORT=3000
       - NODE_ENV=production
-      - ENABLE_QUERY_LOGGING=false
-      - CONNECTION_POOL_SIZE=30
+      - ENABLE_QUERY_LOGGING=${ENABLE_QUERY_LOGGING:-false}
+      - CONNECTION_POOL_SIZE=20
       
-      # 🧠 AUTO-DETECCIÓN HABILITADA (NUEVAS VARIABLES)
+      # 🧠 AUTO-DETECCIÓN HABILITADA
       - SERVER_IP=${SERVER_IP:-localhost}
       - FRONTEND_PORT=${FRONTEND_PORT:-9050}
-      # ❌ ELIMINADAS: FRONTEND_URL y ALLOWED_ORIGINS (se auto-detectan)
       
     depends_on:
       init:
@@ -132,7 +156,7 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
       start_period: 120s
     networks:
@@ -145,7 +169,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-9050}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
@@ -162,3 +187,7 @@ volumes:
 networks:
   foro_network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+          gateway: 172.22.0.1
