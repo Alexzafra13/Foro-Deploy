@@ -1,6 +1,5 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - PLUG-AND-PLAY COMO JELLYFIN
 services:
   # ===== BASE DE DATOS =====
   postgres:
@@ -8,46 +7,55 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-foro_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_super_seguro_123}
       POSTGRES_DB: ${POSTGRES_DB:-forumDB}
+      # 🔑 CLAVE: Cambiar a md5 para compatibilidad total
       POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
     volumes:
       - foro_postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
+    ports:
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-foro_user} -d ${POSTGRES_DB:-forumDB}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
-      foro_network:
-        aliases:
-          - database
+      - foro_network
 
-  # ===== PGBOUNCER BULLETPROOF =====
+  # ===== PGBOUNCER CORREGIDO =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
     restart: unless-stopped
     environment:
+      # Conexión a PostgreSQL - DNS EXPLÍCITO
       DATABASES_HOST: postgres
       DATABASES_PORT: 5432
       DATABASES_USER: ${POSTGRES_USER:-foro_user}
-      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_super_seguro_123}
       DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
       
+      # Pool configuration
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 200
-      DEFAULT_POOL_SIZE: 20
+      DEFAULT_POOL_SIZE: 25
       MIN_POOL_SIZE: 5
       RESERVE_POOL_SIZE: 3
+      
+      # 🔑 CLAVE: Usar md5 en lugar de "any"
       AUTH_TYPE: md5
       
+      # Timeouts extendidos
       SERVER_CONNECT_TIMEOUT: 30
       CLIENT_LOGIN_TIMEOUT: 60
       QUERY_TIMEOUT: 120
+      
+      # Networking
       LISTEN_ADDR: "0.0.0.0"
       LISTEN_PORT: 6432
       
+      # Debug activado temporalmente
       LOG_CONNECTIONS: 1
       LOG_DISCONNECTIONS: 1
       VERBOSE: 2
@@ -56,86 +64,96 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 && psql 'postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@127.0.0.1:6432/${POSTGRES_DB:-forumDB}' -c 'SELECT 1;' || exit 1"]
-      interval: 15s
+      test: ["CMD-SHELL", "psql 'postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@localhost:6432/${POSTGRES_DB:-forumDB}' -c 'SELECT 1;' || exit 1"]
+      interval: 20s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 45s
     networks:
-      foro_network:
-        aliases:
-          - pool
+      - foro_network
 
-  # ===== INIT: Migraciones + Seed =====
-  init:
+  # ===== MIGRACIONES =====
+  migrations:
     image: alexzafra13/foro-api:latest
     environment:
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - JWT_SECRET=${JWT_SECRET:-PLEASE_CHANGE_THIS_JWT_SECRET}
-      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-PLEASE_CHANGE_THIS_EMAIL_SECRET}
-      - MAILER_EMAIL=${MAILER_EMAIL:-admin@localhost}
-      - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
-      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      # Usar conexión directa para migraciones
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - NODE_ENV=production
-      - SERVER_IP=${SERVER_IP}
-      - FRONTEND_PORT=${FRONTEND_PORT:-9050}
-      
     depends_on:
       postgres:
         condition: service_healthy
-    command: >
-      sh -c "
-        echo '🧠 Auto-configurando para IP: ${SERVER_IP:-auto-detect}' &&
-        echo '🔄 Running migrations...' &&
-        npx prisma migrate deploy &&
-        echo '✅ Migrations completed' &&
-        echo '🌱 Running seed...' &&
-        npm run db:seed:prod &&
-        echo '✅ Seed completed - Ready for login!'
-      "
+    command: ["npx", "prisma", "migrate", "deploy"]
     networks:
       - foro_network
     restart: "no"
 
-  # ===== BACKEND CON AUTO-DETECCIÓN =====
+  # ===== SEED =====
+  seed:
+    image: alexzafra13/foro-api:latest
+    environment:
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - NODE_ENV=development
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR}
+      - MAILER_EMAIL=${MAILER_EMAIL:-noreply@localhost}
+      - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    command: ["npm", "run", "db:seed"]
+    networks:
+      - foro_network
+    restart: "no"
+
+  # ===== BACKEND CON FALLBACK REAL =====
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
+    ports:
+      - "${API_PORT:-9090}:3000"
     environment:
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
+      # 🔑 URLs de conexión - PgBouncer PRIMERO, fallback SEGUNDO
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       
-      - JWT_SECRET=${JWT_SECRET:-PLEASE_CHANGE_THIS_JWT_SECRET}
+      # Seguridad
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
-      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-PLEASE_CHANGE_THIS_EMAIL_SECRET}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
       
+      # Email
       - MAILER_SERVICE=${MAILER_SERVICE:-gmail}
-      - MAILER_EMAIL=${MAILER_EMAIL:-admin@localhost}
+      - MAILER_EMAIL=${MAILER_EMAIL:-noreply@localhost}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
       
+      # Servidor
       - PORT=3000
       - NODE_ENV=production
-      - ENABLE_QUERY_LOGGING=${ENABLE_QUERY_LOGGING:-false}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:9050}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:9050,http://localhost:3000,http://localhost:9090}
+      
+      # Performance
+      - ENABLE_QUERY_LOGGING=false
       - CONNECTION_POOL_SIZE=20
       
-      # 🧠 AUTO-DETECCIÓN DEL BACKEND
-      - SERVER_IP=${SERVER_IP}
+      # Auto-detección
+      - SERVER_IP=${SERVER_IP:-192.168.1.100}
       - FRONTEND_PORT=${FRONTEND_PORT:-9050}
       
     depends_on:
-      init:
+      seed:
         condition: service_completed_successfully
-      pgbouncer:
+      # 🔑 CAMBIO: No depender del health de pgbouncer si falla
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
-      timeout: 15s
+      timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 90s
     networks:
       - foro_network
 
