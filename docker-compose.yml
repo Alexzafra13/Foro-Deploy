@@ -9,8 +9,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-foro_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_super_seguro_123}
       POSTGRES_DB: ${POSTGRES_DB:-forumDB}
-      # 🔑 CLAVE: Cambiar a md5 para compatibilidad total
-      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
+      # ✅ scram-sha-256 como en desarrollo
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - foro_postgres_data:/var/lib/postgresql/data
     ports:
@@ -24,38 +24,32 @@ services:
     networks:
       - foro_network
 
-  # ===== PGBOUNCER CORREGIDO =====
+  # ===== PGBOUNCER =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
     restart: unless-stopped
     environment:
-      # Conexión a PostgreSQL - DNS EXPLÍCITO
       DATABASES_HOST: postgres
       DATABASES_PORT: 5432
       DATABASES_USER: ${POSTGRES_USER:-foro_user}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-mi_password_super_seguro_123}
       DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
       
-      # Pool configuration
       POOL_MODE: transaction
-      MAX_CLIENT_CONN: 200
-      DEFAULT_POOL_SIZE: 25
-      MIN_POOL_SIZE: 5
-      RESERVE_POOL_SIZE: 3
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 30
+      MIN_POOL_SIZE: 10
       
-      # 🔑 CLAVE: Usar md5 en lugar de "any"
-      AUTH_TYPE: md5
+      # ✅ scram-sha-256 consistente con PostgreSQL
+      AUTH_TYPE: scram-sha-256
       
-      # Timeouts extendidos
+      # Timeouts y debugging
       SERVER_CONNECT_TIMEOUT: 30
       CLIENT_LOGIN_TIMEOUT: 60
       QUERY_TIMEOUT: 120
-      
-      # Networking
       LISTEN_ADDR: "0.0.0.0"
       LISTEN_PORT: 6432
       
-      # Debug activado temporalmente
       LOG_CONNECTIONS: 1
       LOG_DISCONNECTIONS: 1
       VERBOSE: 2
@@ -72,11 +66,12 @@ services:
     networks:
       - foro_network
 
-  # ===== MIGRACIONES =====
+  # ===== MIGRACIONES CORREGIDAS =====
   migrations:
     image: alexzafra13/foro-api:latest
     environment:
-      # Usar conexión directa para migraciones
+      # ✅ AMBAS VARIABLES NECESARIAS
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - NODE_ENV=production
     depends_on:
@@ -87,32 +82,36 @@ services:
       - foro_network
     restart: "no"
 
-  # ===== SEED =====
+  # ===== SEED CORREGIDO =====
   seed:
     image: alexzafra13/foro-api:latest
     environment:
+      # ✅ AMBAS VARIABLES NECESARIAS
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - NODE_ENV=development
-      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION}
-      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR}
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
       - MAILER_EMAIL=${MAILER_EMAIL:-noreply@localhost}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
     depends_on:
       migrations:
         condition: service_completed_successfully
-    command: ["npm", "run", "db:seed"]
+    # ✅ COMANDO CORREGIDO
+    command: ["npm", "run", "db:seed:prod"]
     networks:
       - foro_network
     restart: "no"
 
-  # ===== BACKEND CON FALLBACK REAL =====
+  # ===== BACKEND CON PGBOUNCER =====
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
     ports:
       - "${API_PORT:-9090}:3000"
     environment:
-      # 🔑 URLs de conexión - PgBouncer PRIMERO, fallback SEGUNDO
+      # ✅ PGBOUNCER COMO PRIMARIO
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
       - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
       - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-mi_password_super_seguro_123}@postgres:5432/${POSTGRES_DB:-forumDB}
@@ -136,7 +135,7 @@ services:
       
       # Performance
       - ENABLE_QUERY_LOGGING=false
-      - CONNECTION_POOL_SIZE=20
+      - CONNECTION_POOL_SIZE=30
       
       # Auto-detección
       - SERVER_IP=${SERVER_IP:-192.168.1.100}
@@ -145,8 +144,10 @@ services:
     depends_on:
       seed:
         condition: service_completed_successfully
-      # 🔑 CAMBIO: No depender del health de pgbouncer si falla
       postgres:
+        condition: service_healthy
+      # ✅ DEPENDENCIA DE PGBOUNCER AGREGADA
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
