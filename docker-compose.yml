@@ -1,6 +1,6 @@
 version: '3.8'
 
-# 🏗️ FORO COMPLETO - PGBOUNCER ARREGLADO PARA SIEMPRE
+# 🏗️ FORO COMPLETO - PLUG-AND-PLAY COMO JELLYFIN
 services:
   # ===== BASE DE DATOS =====
   postgres:
@@ -8,9 +8,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-foro_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-forumDB}
-      # 🎯 AUTH COMPATIBLE CON PGBOUNCER
       POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
     volumes:
       - foro_postgres_data:/var/lib/postgresql/data
@@ -24,56 +23,40 @@ services:
       foro_network:
         aliases:
           - database
-          - db
 
-  # ===== PGBOUNCER CONFIGURACIÓN BULLETPROOF =====
+  # ===== PGBOUNCER BULLETPROOF =====
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
     restart: unless-stopped
     environment:
-      # 🔗 CONFIGURACIÓN BÁSICA
       DATABASES_HOST: postgres
       DATABASES_PORT: 5432
       DATABASES_USER: ${POSTGRES_USER:-foro_user}
-      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}
       DATABASES_DBNAME: ${POSTGRES_DB:-forumDB}
       
-      # 🎯 POOL CONFIGURATION OPTIMIZADA
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 200
       DEFAULT_POOL_SIZE: 20
       MIN_POOL_SIZE: 5
       RESERVE_POOL_SIZE: 3
-      
-      # 🛡️ AUTH COMPATIBLE CON POSTGRES
       AUTH_TYPE: md5
       
-      # ⏱️ TIMEOUTS GENEROSOS PARA ESTABILIDAD
       SERVER_CONNECT_TIMEOUT: 30
       CLIENT_LOGIN_TIMEOUT: 60
-      SERVER_LOGIN_RETRY: 3
       QUERY_TIMEOUT: 120
-      
-      # 🌐 CONFIGURACIÓN DE RED
       LISTEN_ADDR: "0.0.0.0"
       LISTEN_PORT: 6432
       
-      # 🔧 CONFIGURACIÓN AVANZADA
-      SERVER_LIFETIME: 3600
-      SERVER_IDLE_TIMEOUT: 600
-      STATS_PERIOD: 60
-      
-      # 📝 LOGS DETALLADOS
       LOG_CONNECTIONS: 1
       LOG_DISCONNECTIONS: 1
-      LOG_POOLER_ERRORS: 1
       VERBOSE: 2
       
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 && psql 'postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@127.0.0.1:6432/${POSTGRES_DB:-forumDB}' -c 'SELECT 1;' || exit 1"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6432 && psql 'postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@127.0.0.1:6432/${POSTGRES_DB:-forumDB}' -c 'SELECT 1;' || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -87,18 +70,15 @@ services:
   init:
     image: alexzafra13/foro-api:latest
     environment:
-      # 🔗 USAR CONEXIÓN DIRECTA PARA MIGRACIONES (MÁS CONFIABLE)
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
-      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
-      - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - JWT_SECRET=${JWT_SECRET:-PLEASE_CHANGE_THIS_JWT_SECRET}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-PLEASE_CHANGE_THIS_EMAIL_SECRET}
+      - MAILER_EMAIL=${MAILER_EMAIL:-admin@localhost}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
       - NODE_ENV=production
-      
-      # 🧠 AUTO-DETECCIÓN
-      - SERVER_IP=${SERVER_IP:-localhost}
+      - SERVER_IP=${SERVER_IP}
       - FRONTEND_PORT=${FRONTEND_PORT:-9050}
       
     depends_on:
@@ -106,6 +86,7 @@ services:
         condition: service_healthy
     command: >
       sh -c "
+        echo '🧠 Auto-configurando para IP: ${SERVER_IP:-auto-detect}' &&
         echo '🔄 Running migrations...' &&
         npx prisma migrate deploy &&
         echo '✅ Migrations completed' &&
@@ -117,35 +98,31 @@ services:
       - foro_network
     restart: "no"
 
-  # ===== BACKEND CON FALLBACK AUTOMÁTICO =====
+  # ===== BACKEND CON AUTO-DETECCIÓN =====
   backend:
     image: alexzafra13/foro-api:latest
     restart: unless-stopped
     environment:
-      # 🔗 PGBOUNCER PRIMARIO CON FALLBACK AUTOMÁTICO
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
-      - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_DIRECT_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
+      - POSTGRES_FALLBACK_URL=postgresql://${POSTGRES_USER:-foro_user}:${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD}@postgres:5432/${POSTGRES_DB:-forumDB}
       
-      # 🔐 SEGURIDAD
-      - JWT_SECRET=${JWT_SECRET:-jwt_secret_CAMBIAR_EN_PRODUCCION_123456789}
+      - JWT_SECRET=${JWT_SECRET:-PLEASE_CHANGE_THIS_JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
-      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-email_secret_CAMBIAR_123456789}
+      - EMAIL_VERIFICATION_SECRET=${EMAIL_VERIFICATION_SECRET:-PLEASE_CHANGE_THIS_EMAIL_SECRET}
       - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
       
-      # 📧 EMAIL
       - MAILER_SERVICE=${MAILER_SERVICE:-gmail}
-      - MAILER_EMAIL=${MAILER_EMAIL:-admin@foro.local}
+      - MAILER_EMAIL=${MAILER_EMAIL:-admin@localhost}
       - MAILER_SECRET_KEY=${MAILER_SECRET_KEY:-dummy_password}
       
-      # ⚙️ SERVIDOR
       - PORT=3000
       - NODE_ENV=production
       - ENABLE_QUERY_LOGGING=${ENABLE_QUERY_LOGGING:-false}
       - CONNECTION_POOL_SIZE=20
       
-      # 🧠 AUTO-DETECCIÓN HABILITADA
-      - SERVER_IP=${SERVER_IP:-localhost}
+      # 🧠 AUTO-DETECCIÓN DEL BACKEND
+      - SERVER_IP=${SERVER_IP}
       - FRONTEND_PORT=${FRONTEND_PORT:-9050}
       
     depends_on:

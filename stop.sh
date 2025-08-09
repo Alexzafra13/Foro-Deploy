@@ -1,8 +1,10 @@
 #!/bin/bash
-# stop.sh - Parar todos los servicios
+# stop.sh - Parar servicios del foro
 
 echo "🛑 Parando servicios del foro..."
 docker-compose down
 
-echo "📋 Para eliminar también los datos:"
-echo "   docker-compose down -v"
+echo "✅ Servicios parados"
+echo ""
+echo "💡 Para iniciar de nuevo: ./deploy.sh"
+echo "🗑️  Para eliminar datos: docker-compose down -v"
